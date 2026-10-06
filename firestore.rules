@@ -1,0 +1,43 @@
+rules_version = '2';
+// Règles de sécurité — Déménagement SBA
+// Propriétaire = administrateur principal (même e-mail que dans firebase-config.js)
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function owner() {
+      return signedIn()
+        && request.auth.token.email == 'issamemeallem@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+    function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isAdmin() { return owner() || (hasProfile() && profile().active == true && profile().role == 'admin'); }
+    function isStaff() { return isAdmin() || (hasProfile() && profile().active == true); }
+
+    // Déménagements et transports : tous les employés actifs lisent, ajoutent, modifient ; seul l'admin supprime
+    match /moves/{id} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+    // Frais et bénéfices : administrateurs uniquement
+    match /moveCosts/{id} {
+      allow read, write: if isAdmin();
+    }
+    // Informations de l'entreprise (en-tête des factures)
+    match /settings/company {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+    // Compteur des numéros de facture : un employé ne peut qu'avancer de +1
+    match /settings/counter {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.next is int;
+      allow update: if isAdmin() || (isStaff() && request.resource.data.next == resource.data.next + 1);
+    }
+    // Comptes des employés
+    match /users/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow write: if isAdmin();
+    }
+  }
+}
